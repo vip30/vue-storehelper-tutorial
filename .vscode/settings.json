@@ -1,0 +1,7 @@
+{
+  "editor.formatOnSave": true,
+  "vetur.format.defaultFormatter.stylus": "none",
+  "tslint.autoFixOnSave": true,
+  "files.trimTrailingWhitespace": true,
+  "typescript.tsdk": "node_modules/typescript/lib"
+}

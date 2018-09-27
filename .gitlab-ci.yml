@@ -1,0 +1,149 @@
+variables:
+  DOCKER_DRIVER: overlay2
+  CONTAINER_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+  PROJECT_NAME: landing-web
+
+stages:
+  - test
+  - build
+  - deploy
+
+test-unit:
+  stage: test
+  image: registry.scmp.tech/technology/newsroom-system/docker/node-chrome-headless:alpine
+  cache:
+    key: node_modules-cache
+    paths:
+      - node_modules/
+  script:
+    - printf "machine project.scmp.tech\nlogin gitlab-ci-token\npassword %s\n" "${CI_JOB_TOKEN}" > ~/.netrc
+    - npm install
+    - npm run cover
+  coverage: /All files\s*\|\s*([\d\.]+)/
+
+test-e2e:
+  stage: test
+  when: manual
+  allow_failure: true
+  image: docker:latest
+  services:
+    - docker:dind
+  variables:
+    SCMP_CI_TOKEN: $CI_JOB_TOKEN
+  cache:
+    key: node_modules-cache
+  artifacts:
+    paths:
+      - reports
+    expire_in: 1 month
+  script:
+    - apk add --update py-pip && pip install docker-compose
+    - docker-compose -f docker-compose.e2e.yml up --abort-on-container-exit
+  after_script:
+    - docker-compose -f docker-compose.e2e.yml down
+
+build:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  cache:
+    key: node_modules-cache
+  only:
+    - master
+    - production
+  except:
+    - tags
+  script:
+    - docker login $CI_REGISTRY -u gitlab-ci-token -p $CI_JOB_TOKEN
+    - docker build --pull --build-arg token=$CI_JOB_TOKEN -t $CONTAINER_IMAGE .
+    - docker push $CONTAINER_IMAGE
+
+deploy uat-2:
+  stage: deploy
+  only:
+    - master
+  image: registry.scmp.tech/technology/system/kubectl:1.11.2
+  services: []
+  variables:
+    K8S_API: $DEV_2_K8S_API
+    K8S_CA: $DEV_2_K8S_CA
+    K8S_NS: $DEV_2_K8S_NS
+    K8S_TKN: $DEV_2_K8S_TKN
+    K8S_DIR: $DEV_2_K8S_DIR
+    K8S_ENV_DOMAIN: uat-${PROJECT_NAME}.${DEV_2_K8S_NS}.d2.scmp.tech
+    K8S_PROJECT: $CI_PROJECT_NAME
+    K8S_ENV_SLUG: uat
+  before_script: [kubectl-auth]
+  script:
+    - /bin/sh k8s/deploy.sh
+  environment:
+    name: Uat-2
+    url: https://uat-${PROJECT_NAME}.${DEV_2_K8S_NS}.d2.scmp.tech
+
+deploy staging-2:
+  stage: deploy
+  when: manual
+  only:
+    - production
+  image: registry.scmp.tech/technology/system/kubectl:1.11.2
+  services: []
+  variables:
+    K8S_API: $DEV_2_K8S_API
+    K8S_CA: $DEV_2_K8S_CA
+    K8S_NS: $DEV_2_K8S_NS
+    K8S_TKN: $DEV_2_K8S_TKN
+    K8S_DIR: $DEV_2_K8S_DIR
+    K8S_ENV_DOMAIN: stg-${PROJECT_NAME}.${DEV_2_K8S_NS}.d2.scmp.tech
+    K8S_PROJECT: $CI_PROJECT_NAME
+    K8S_ENV_SLUG: staging
+  before_script: [kubectl-auth]
+  script:
+    - /bin/sh k8s/deploy.sh
+  environment:
+    name: Staging-2
+    url: https://stg-${PROJECT_NAME}.${DEV_2_K8S_NS}.d2.scmp.tech
+
+deploy production:
+  stage: deploy
+  when: manual
+  only:
+    - production
+  image: registry.scmp.tech/technology/system/kubectl
+  services: []
+  variables:
+    K8S_API: $PROD_K8S_API
+    K8S_CA: $PROD_K8S_CA
+    K8S_NS: $PROD_K8S_NS
+    K8S_TKN: $PROD_K8S_TKN
+    K8S_DIR: $PROD_K8S_DIR
+    K8S_PROJECT: $CI_PROJECT_NAME
+    K8S_ENV_SLUG: production
+  before_script: [kubectl-auth]
+  script:
+    - /bin/sh k8s/deploy.sh
+  environment:
+    name: Production
+    url: https://www.scmp.work
+
+deploy production-2:
+  stage: deploy
+  when: manual
+  only:
+    - production
+  image: registry.scmp.tech/technology/system/kubectl:1.11.2
+  services: []
+  variables:
+    K8S_API: $PROD_2_K8S_API
+    K8S_CA: $PROD_2_K8S_CA
+    K8S_NS: $PROD_2_K8S_NS
+    K8S_TKN: $PROD_2_K8S_TKN
+    K8S_DIR: $PROD_2_K8S_DIR
+    K8S_PROJECT: $CI_PROJECT_NAME
+    K8S_ENV_SLUG: production
+  before_script: [kubectl-auth]
+  script:
+    - /bin/sh k8s/deploy.sh
+  environment:
+    name: Production-2
+    url: https://www.scmp.work
